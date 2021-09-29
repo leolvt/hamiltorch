@@ -931,6 +931,9 @@ def sample(log_prob_func, params_init, num_samples=10, num_steps_per_sample=10, 
 
     """
 
+    if callbacks is None:
+        callbacks = []
+
     # Needed for memory moving i.e. move samples to CPU RAM so lookup GPU device
     device = params_init.device
 
