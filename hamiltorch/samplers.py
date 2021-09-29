@@ -857,7 +857,7 @@ def update_cyclic_step_size(init_step_size, total_steps, num_cycles, step_number
                 init_step_size)
 
 
-def sample(log_prob_func, params_init, num_samples=10, num_steps_per_sample=10, step_size=0.1, burn=-1, num_cycles=1, jitter=None, inv_mass=None, normalizing_const=1., softabs_const=None, explicit_binding_const=100, fixed_point_threshold=1e-5, fixed_point_max_iterations=1000, jitter_max_tries=10, sampler=Sampler.HMC, integrator=Integrator.IMPLICIT, metric=Metric.HESSIAN, debug=False, desired_accept_rate=0.8, store_on_GPU = True, return_rejection_indicator=False, call_back_fn = None, call_back_interval = 1):
+def sample(log_prob_func, params_init, num_samples=10, num_steps_per_sample=10, step_size=0.1, burn=-1, num_cycles=1, jitter=None, inv_mass=None, normalizing_const=1., softabs_const=None, explicit_binding_const=100, fixed_point_threshold=1e-5, fixed_point_max_iterations=1000, jitter_max_tries=10, sampler=Sampler.HMC, integrator=Integrator.IMPLICIT, metric=Metric.HESSIAN, debug=False, desired_accept_rate=0.8, store_on_GPU = True, return_rejection_indicator=False, callbacks = None):
     """ This is the main sampling function of hamiltorch. Most samplers are built on top of this class. This function receives a function handle log_prob_func,
      which the sampler will use to evaluate the log probability of each sample. A log_prob_func must take a 1-d vector of length equal to the number of parameters that are being
      sampled.
@@ -914,12 +914,11 @@ def sample(log_prob_func, params_init, num_samples=10, num_steps_per_sample=10, 
         Option that determines whether to keep samples in GPU memory. It runs fast when set to TRUE but may run out of memory unless set to FALSE.
     return_rejection_indicator: bool
         returns an acceptance indicator array without printing debug statements
-    call_back_fn : function
-        a function which will be called every `call_back_interval` with the signature 
+    callbacks : list of (int, function)
+        A collection of callbacks to be called during the sampling. Each element in the list is a pair (freq, function),
+        where `function` will be called at every `freq` sample.
+        The signature of the callback function is:
         ```call_back_fn(current_parameter, proposal, rejection:bool, current_step_size, sample_id)```
-        Activates after burn
-    call_back_interval : int
-        refer above
     Returns
     -------
     param_samples : list of torch.tensor(s)
@@ -978,7 +977,6 @@ def sample(log_prob_func, params_init, num_samples=10, num_steps_per_sample=10, 
     else:
         ret_params = [params.clone()]
 
-    num_rejected = 0
     rejection_indicator = np.zeros(num_samples, dtype=float)
     # if sampler == Sampler.HMC:
     # util.progress_bar_init('Sampling ({}; {})'.format(sampler, integrator), num_samples, 'Samples')
@@ -1026,7 +1024,13 @@ def sample(log_prob_func, params_init, num_samples=10, num_steps_per_sample=10, 
             if debug == 1:
                 tqdm.write(f'Step: {n}, Current Hamiltoninian: {ham}, Proposed Hamiltoninian: {new_ham}')
             
-            proposal = params.detach()
+            with torch.no_grad():
+                if store_on_GPU:
+                    current_params = ret_params[-1].clone().to(device)
+                    proposed_params = params.clone().to(device)
+                else:
+                    current_params = ret_params[-1].clone().to("cpu")
+                    proposed_params = params.clone().to("cpu")
 
             if rho >= torch.log(torch.rand(1)):
                 if debug == 1:
@@ -1050,14 +1054,17 @@ def sample(log_prob_func, params_init, num_samples=10, num_steps_per_sample=10, 
                         ret_params.append(ret_params[-1].cpu())
                 if debug == 1:
                     tqdm.write('REJECT')
-            
-            if call_back_fn is not None  and n > burn and ((n-max(burn,0)) % call_back_interval) == 0:
-                call_back_fn(
-                    ret_params[-2].detach(),
-                    proposal, 
-                    rejection_indicator[n]==True,
-                    step_size,
-                    n)
+
+
+            for freq, callback_fn in callbacks:
+                if n % freq == 0:
+                    callback_fn(
+                        current_params,
+                        proposed_params, 
+                        rejection_indicator[n]==True,
+                        step_size,
+                        n
+                    )
             
             if NUTS and n <= burn:
                 if n < burn:
@@ -1107,6 +1114,14 @@ def sample(log_prob_func, params_init, num_samples=10, num_steps_per_sample=10, 
                 # var_names = ['momentum', 'leapfrog_params', 'leapfrog_momenta', 'ham', 'new_ham']
                 # [util.gpu_check_delete(var, locals()) for var in var_names]
             # import pdb; pdb.set_trace()
+            
+        # if call_back_fn is not None  and n > burn and ((n-max(burn,0)) % call_back_interval) == 0:
+        #     call_back_fn(
+        #         ret_params[-2].detach(),
+        #         proposal, 
+        #         rejection_indicator[n]==True,
+        #         step_size,
+        #         n)
 
 
     # import pdb; pdb.set_trace()
