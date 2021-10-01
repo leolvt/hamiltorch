@@ -985,9 +985,14 @@ def sample(log_prob_func, params_init, num_samples=10, num_steps_per_sample=10, 
     # util.progress_bar_init('Sampling ({}; {})'.format(sampler, integrator), num_samples, 'Samples')
     progress_bar = tqdm(total=num_samples)
     for n in range(num_samples):
+        if n > 100:
+            inst_rej = rejection_indicator[n-100:n].mean()
+        else:
+            inst_rej = rejection_indicator.sum() / n
+
         progress_bar.update()
         progress_bar.set_description(
-            f"Progress | Rejections = {rejection_indicator.sum()}/{n} ({(float(rejection_indicator.sum())/max(1, n)):.2f}) |")
+            f"Progress | Rejections = {rejection_indicator.sum()}/{n} (Cum.: {(float(rejection_indicator.sum())/max(1, n)):.2f}, Inst: {inst_rej:.2f}) |")
         # util.progress_bar_update(n)
         try:
             if CYCLIC_LR:
